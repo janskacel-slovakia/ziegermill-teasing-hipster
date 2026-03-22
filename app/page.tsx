@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import mapboxgl from 'mapbox-gl';
+import type mapboxglType from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 import { translations } from './translations';
@@ -28,9 +28,12 @@ const galleryImages = [
   '/gallery-10.jpg',
 ];
 
-// --- THE TRANSLATION DICTIONARY ---
+// Pre-allocate large arrays outside the component to prevent reallocation
+const bgSequences = Array(8).fill(null);
+const bgRows = Array(80).fill(null);
 
-const FadeInSection = ({ children, delayMs = 0 }: { children: React.ReactNode, delayMs?: number }) => {
+// Memoized to prevent heavy re-evaluations during state changes (e.g. slideshow ticks)
+const FadeInSection = React.memo(({ children, delayMs = 0 }: { children: React.ReactNode, delayMs?: number }) => {
   const [isVisible, setVisible] = useState(false);
   const domRef = useRef<HTMLDivElement>(null);
 
@@ -59,19 +62,16 @@ const FadeInSection = ({ children, delayMs = 0 }: { children: React.ReactNode, d
       {children}
     </div>
   );
-};
+});
+FadeInSection.displayName = 'FadeInSection';
 
-const BackgroundPattern = () => {
-  const sequences = Array(8).fill(null);
-  // Increase the number of rows significantly so the pattern covers the full height of the scrollable page
-  const rows = Array(80).fill(null);
-
+// Memoized to prevent rendering thousands of DOM nodes on every parent state update
+const BackgroundPattern = React.memo(() => {
   return (
-    // Changed "fixed" to "absolute" so it scrolls with the main relative container
     <div className="absolute inset-0 -z-10 flex flex-col gap-12 bg-[#DBDAC8] overflow-hidden py-12">
-      {rows.map((_, rowIndex) => (
+      {bgRows.map((_, rowIndex) => (
         <div key={rowIndex} className="flex gap-16 w-max px-12 h-32 shrink-0">
-          {sequences.map((_, seqIndex) => (
+          {bgSequences.map((_, seqIndex) => (
             <React.Fragment key={seqIndex}>
               <div className="flex gap-8">
                 <div className="w-[29px] bg-[#3091b3] h-full"></div>
@@ -89,7 +89,8 @@ const BackgroundPattern = () => {
       ))}
     </div>
   );
-};
+});
+BackgroundPattern.displayName = 'BackgroundPattern';
 
 export default function Home() {
   const [name, setName] = useState('');
@@ -114,6 +115,14 @@ export default function Home() {
     setTouchEnd(e.targetTouches[0].clientX);
   };
 
+  const showNextImage = React.useCallback(() => {
+    setSelectedImageIndex((prev) => prev !== null ? (prev + 1) % galleryImages.length : null);
+  }, []);
+
+  const showPrevImage = React.useCallback(() => {
+    setSelectedImageIndex((prev) => prev !== null ? (prev === 0 ? galleryImages.length - 1 : prev - 1) : null);
+  }, []);
+
   const onTouchEnd = () => {
     if (!touchStart || !touchEnd) return;
     const distance = touchStart - touchEnd;
@@ -124,19 +133,20 @@ export default function Home() {
     if (isRightSwipe) showPrevImage();
   };
 
-  // State for Menu Scroll Behavior
+  // State for Menu Scroll Behavior - Optimized with a ref to prevent re-renders on every scroll tick
   const [showNav, setShowNav] = useState(true);
-  const [lastScrollY, setLastScrollY] = useState(0);
+  const scrollYRef = useRef(0);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const [language, setLanguage] = useState<'SK' | 'EN' | 'DE'>('SK'); 
 
+  // Lazy mapbox implementation hooks
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<mapboxglType.Map | null>(null);
+  const [isMapVisible, setIsMapVisible] = useState(false);
 
   const t = translations[language] as any;
 
-  // IP Address Geolocation hook to automatically set language
   useEffect(() => {
     const detectUserLocation = async () => {
       try {
@@ -160,24 +170,30 @@ export default function Home() {
     detectUserLocation();
   }, []);
 
-  // Updated Scroll Tracking Logic
+  // Highly optimized scroll listener
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
       
-      if (currentScrollY > lastScrollY && currentScrollY > 100) {
-        setShowNav(false);
-        setIsMenuOpen(false); // Close menu on scroll down
+      if (currentScrollY > scrollYRef.current && currentScrollY > 100) {
+        setShowNav((prev) => {
+          if (prev) return false;
+          return prev;
+        });
+        setIsMenuOpen(false);
       } else {
-        setShowNav(true);
+        setShowNav((prev) => {
+          if (!prev) return true;
+          return prev;
+        });
       }
       
-      setLastScrollY(currentScrollY);
+      scrollYRef.current = currentScrollY;
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [lastScrollY]);
+  }, []);
 
   useEffect(() => {
     const slideInterval = setInterval(() => {
@@ -202,188 +218,212 @@ export default function Home() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedImageIndex]);
+  }, [selectedImageIndex, showNextImage, showPrevImage]);
 
- // --- MAPBOX INITIALIZATION HOOK ---
+  // Observer to lazily load Mapbox only when the user scrolls near it
   useEffect(() => {
-    if (!mapContainerRef.current) return;
-    if (mapRef.current) return; 
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setIsMapVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '400px' } // Pre-load slightly before it comes into view
+    );
+    
+    if (mapContainerRef.current) {
+      observer.observe(mapContainerRef.current);
+    }
+    return () => observer.disconnect();
+  }, []);
 
-    mapboxgl.accessToken = 'pk.eyJ1IjoiamFuc2thY2VsIiwiYSI6ImNtbXVlaTV5djF4cDkzMXNkZHlvZmJiaGQifQ.lHBxLmr5NR_QFhXjEXPkbQ';
+  // Dynamically import Mapbox GL only when visible
+  useEffect(() => {
+    if (!isMapVisible || !mapContainerRef.current || mapRef.current) return; 
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: 'mapbox://styles/janskacel/cmmutgfuo00ac01s9cznqfnaa', 
-      center: [17.0950, 48.1240],
-      zoom: 15.5, 
-      pitch: 75, 
-      bearing: 15, 
-      scrollZoom: false,
-      cooperativeGestures: true,
-      attributionControl: false
-    });
-
-    mapRef.current = map;
-    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-    map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
-
-    map.on('load', () => {
-      if (!document.getElementById('mapbox-custom-styles')) {
-        const style = document.createElement('style');
-        style.id = 'mapbox-custom-styles';
-        style.innerHTML = `
-          @keyframes mapbox-pulse {
-            0% { box-shadow: 0 0 0 0 rgba(255, 166, 43, 0.6); }
-            70% { box-shadow: 0 0 0 20px rgba(255, 166, 43, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 166, 43, 0); }
-          }
-          .zieger-pulse {
-            animation: mapbox-pulse 2s infinite;
-          }
-        `;
-        document.head.appendChild(style);
-      }
-
-      const projectWrapper = document.createElement('div');
-      projectWrapper.style.display = 'flex';
-      projectWrapper.style.flexDirection = 'column';
-      projectWrapper.style.alignItems = 'center';
-      projectWrapper.style.cursor = 'pointer';
-      projectWrapper.style.zIndex = '50';
-
-      const projectPin = document.createElement('div');
-      projectPin.className = 'zieger-pulse';
-      projectPin.style.backgroundColor = '#ffa62b'; 
-      projectPin.style.width = '52px';
-      projectPin.style.height = '52px';
-      projectPin.style.display = 'flex';
-      projectPin.style.alignItems = 'center';
-      projectPin.style.justifyContent = 'center';
-      projectPin.style.border = '3px solid #ffffff';
+    // Dynamic import drastically reduces the initial JS bundle
+    import('mapbox-gl').then((mapboxglModule) => {
+      const mapboxgl = mapboxglModule.default;
       
-      projectPin.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 21h18"></path>
-          <path d="M5 21V8l7-5 7 5v13"></path>
-          <path d="M9 21v-5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v5"></path>
-        </svg>
-      `;
+      mapboxgl.accessToken = 'pk.eyJ1IjoiamFuc2thY2VsIiwiYSI6ImNtbXVlaTV5djF4cDkzMXNkZHlvZmJiaGQifQ.lHBxLmr5NR_QFhXjEXPkbQ';
 
-      const projectLabel = document.createElement('div');
-      projectLabel.innerHTML = 'ZIEGER MILL';
-      projectLabel.style.backgroundColor = '#1c1917'; 
-      projectLabel.style.color = '#ffffff';
-      projectLabel.style.padding = '4px 12px';
-      projectLabel.style.fontSize = '12px';
-      projectLabel.style.fontWeight = '800';
-      projectLabel.style.letterSpacing = '1px';
-      projectLabel.style.marginTop = '-10px'; 
-      projectLabel.style.boxShadow = '0 4px 10px rgba(0,0,0,0.3)';
-      projectLabel.style.border = '1px solid #44403c';
-      projectLabel.style.whiteSpace = 'nowrap';
-      projectLabel.style.fontFamily = '"Avenir Black", Avenir, sans-serif';
+      const map = new mapboxgl.Map({
+        container: mapContainerRef.current as HTMLDivElement,
+        style: 'mapbox://styles/janskacel/cmmutgfuo00ac01s9cznqfnaa', 
+        center: [17.0950, 48.1240],
+        zoom: 15.5, 
+        pitch: 75, 
+        bearing: 15, 
+        scrollZoom: false,
+        cooperativeGestures: true,
+        attributionControl: false
+      });
 
-      projectWrapper.appendChild(projectPin);
-      projectWrapper.appendChild(projectLabel);
+      mapRef.current = map;
+      map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+      map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
 
-      new mapboxgl.Marker({ 
-        element: projectWrapper, 
-        anchor: 'bottom' 
-      })
-      .setLngLat([17.0935, 48.1201])
-      .addTo(map);
+      map.on('load', () => {
+        if (!document.getElementById('mapbox-custom-styles')) {
+          const style = document.createElement('style');
+          style.id = 'mapbox-custom-styles';
+          style.innerHTML = `
+            @keyframes mapbox-pulse {
+              0% { box-shadow: 0 0 0 0 rgba(255, 166, 43, 0.6); }
+              70% { box-shadow: 0 0 0 20px rgba(255, 166, 43, 0); }
+              100% { box-shadow: 0 0 0 0 rgba(255, 166, 43, 0); }
+            }
+            .zieger-pulse {
+              animation: mapbox-pulse 2s infinite;
+            }
+          `;
+          document.head.appendChild(style);
+        }
 
-      const landmarks = [
-        { name: "Bratislavský hrad", coords: [17.1001, 48.1422], walkTime: "40 min", icon: "/icon-castle.png" },
-        { name: "Sad Janka Kráľa & Aupark", coords: [17.1085, 48.1360], walkTime: "25 min", icon: "/icon-park.png" },
-        { name: "Vienna Gate, Tesco, Lekáreň", coords: [17.0977, 48.1214], walkTime: "5 min",  icon: "/icon-shop-bus.png" },
-        { name: "ŽST Bratislava-Petržalka", coords: [17.0989, 48.1217], walkTime: "6 min",  icon: "/icon-train.png" },
-        { name: "Kúpalisko Matadorka", coords: [17.0933, 48.1228], walkTime: "4 min",  icon: "/icon-swim.png" },
-      ];
+        const projectWrapper = document.createElement('div');
+        projectWrapper.style.display = 'flex';
+        projectWrapper.style.flexDirection = 'column';
+        projectWrapper.style.alignItems = 'center';
+        projectWrapper.style.cursor = 'pointer';
+        projectWrapper.style.zIndex = '50';
 
-      landmarks.forEach(poi => {
-        const markerContainer = document.createElement('div');
-        markerContainer.style.display = 'flex';
-        markerContainer.style.flexDirection = 'column';
-        markerContainer.style.alignItems = 'center';
-        markerContainer.style.cursor = 'pointer';
-        markerContainer.style.zIndex = '10';
-
-        const tooltip = document.createElement('div');
-        tooltip.innerHTML = poi.name;
-        tooltip.style.position = 'absolute';
-        tooltip.style.bottom = '100%'; 
-        tooltip.style.left = '50%';
-        tooltip.style.transform = 'translateX(-50%)';
-        tooltip.style.marginBottom = '8px'; 
-        tooltip.style.backgroundColor = '#1c1917'; 
-        tooltip.style.color = '#ffffff';
-        tooltip.style.padding = '6px 12px';
-        tooltip.style.fontSize = '12px';
-        tooltip.style.fontWeight = '700';
-        tooltip.style.whiteSpace = 'nowrap';
-        tooltip.style.opacity = '0'; 
-        tooltip.style.transition = 'opacity 0.2s ease-in-out'; 
-        tooltip.style.pointerEvents = 'none'; 
-        tooltip.style.boxShadow = '0 4px 10px rgba(0,0,0,0.3)';
-        tooltip.style.zIndex = '20';
-        tooltip.style.fontFamily = '"Avenir Light", Avenir, sans-serif';
-
-        const iconDiv = document.createElement('div');
-        iconDiv.style.width = '50px';
-        iconDiv.style.height = '50px';
-        iconDiv.style.backgroundImage = `url(${poi.icon})`;
-        iconDiv.style.backgroundSize = 'contain';
-        iconDiv.style.backgroundRepeat = 'no-repeat';
-        iconDiv.style.backgroundPosition = 'center';
-        iconDiv.style.borderRadius = '50%';
-        iconDiv.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)'; 
-
-        const timeLabel = document.createElement('div');
-        timeLabel.innerHTML = `
-          <div style="color: #544740; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 4px;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="#544740" stroke="#544740" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/>
-              <path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/>
-            </svg>
-            ${poi.walkTime}
-          </div>
+        const projectPin = document.createElement('div');
+        projectPin.className = 'zieger-pulse';
+        projectPin.style.backgroundColor = '#ffa62b'; 
+        projectPin.style.width = '52px';
+        projectPin.style.height = '52px';
+        projectPin.style.display = 'flex';
+        projectPin.style.alignItems = 'center';
+        projectPin.style.justifyContent = 'center';
+        projectPin.style.border = '3px solid #ffffff';
+        
+        projectPin.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 21h18"></path>
+            <path d="M5 21V8l7-5 7 5v13"></path>
+            <path d="M9 21v-5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v5"></path>
+          </svg>
         `;
-        timeLabel.style.backgroundColor = 'rgba(255, 255, 255, 0.95)';
-        timeLabel.style.padding = '2px 8px';
-        timeLabel.style.borderRadius = '12px';
-        timeLabel.style.marginTop = '-10px'; 
-        timeLabel.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
-        timeLabel.style.border = '1px solid #e7e5e4';
-        timeLabel.style.fontFamily = '"Avenir Light", Avenir, sans-serif';
 
-        markerContainer.addEventListener('mouseenter', () => {
-          tooltip.style.opacity = '1';
-          markerContainer.style.zIndex = '30';
-        });
-        markerContainer.addEventListener('mouseleave', () => {
-          tooltip.style.opacity = '0';
-          markerContainer.style.zIndex = '10';
-        });
+        const projectLabel = document.createElement('div');
+        projectLabel.innerHTML = 'ZIEGER MILL';
+        projectLabel.style.backgroundColor = '#1c1917'; 
+        projectLabel.style.color = '#ffffff';
+        projectLabel.style.padding = '4px 12px';
+        projectLabel.style.fontSize = '12px';
+        projectLabel.style.fontWeight = '800';
+        projectLabel.style.letterSpacing = '1px';
+        projectLabel.style.marginTop = '-10px'; 
+        projectLabel.style.boxShadow = '0 4px 10px rgba(0,0,0,0.3)';
+        projectLabel.style.border = '1px solid #44403c';
+        projectLabel.style.whiteSpace = 'nowrap';
+        projectLabel.style.fontFamily = '"Avenir Black", Avenir, sans-serif';
 
-        markerContainer.appendChild(tooltip); 
-        markerContainer.appendChild(iconDiv);
-        markerContainer.appendChild(timeLabel);
+        projectWrapper.appendChild(projectPin);
+        projectWrapper.appendChild(projectLabel);
 
         new mapboxgl.Marker({ 
-          element: markerContainer, 
+          element: projectWrapper, 
           anchor: 'bottom' 
         })
-        .setLngLat(poi.coords as [number, number])
+        .setLngLat([17.0935, 48.1201])
         .addTo(map);
+
+        const landmarks = [
+          { name: "Bratislavský hrad", coords: [17.1001, 48.1422], walkTime: "40 min", icon: "/icon-castle.png" },
+          { name: "Sad Janka Kráľa & Aupark", coords: [17.1085, 48.1360], walkTime: "25 min", icon: "/icon-park.png" },
+          { name: "Vienna Gate, Tesco, Lekáreň", coords: [17.0977, 48.1214], walkTime: "5 min",  icon: "/icon-shop-bus.png" },
+          { name: "ŽST Bratislava-Petržalka", coords: [17.0989, 48.1217], walkTime: "6 min",  icon: "/icon-train.png" },
+          { name: "Kúpalisko Matadorka", coords: [17.0933, 48.1228], walkTime: "4 min",  icon: "/icon-swim.png" },
+        ];
+
+        landmarks.forEach(poi => {
+          const markerContainer = document.createElement('div');
+          markerContainer.style.display = 'flex';
+          markerContainer.style.flexDirection = 'column';
+          markerContainer.style.alignItems = 'center';
+          markerContainer.style.cursor = 'pointer';
+          markerContainer.style.zIndex = '10';
+
+          const tooltip = document.createElement('div');
+          tooltip.innerHTML = poi.name;
+          tooltip.style.position = 'absolute';
+          tooltip.style.bottom = '100%'; 
+          tooltip.style.left = '50%';
+          tooltip.style.transform = 'translateX(-50%)';
+          tooltip.style.marginBottom = '8px'; 
+          tooltip.style.backgroundColor = '#1c1917'; 
+          tooltip.style.color = '#ffffff';
+          tooltip.style.padding = '6px 12px';
+          tooltip.style.fontSize = '12px';
+          tooltip.style.fontWeight = '700';
+          tooltip.style.whiteSpace = 'nowrap';
+          tooltip.style.opacity = '0'; 
+          tooltip.style.transition = 'opacity 0.2s ease-in-out'; 
+          tooltip.style.pointerEvents = 'none'; 
+          tooltip.style.boxShadow = '0 4px 10px rgba(0,0,0,0.3)';
+          tooltip.style.zIndex = '20';
+          tooltip.style.fontFamily = '"Avenir Light", Avenir, sans-serif';
+
+          const iconDiv = document.createElement('div');
+          iconDiv.style.width = '50px';
+          iconDiv.style.height = '50px';
+          iconDiv.style.backgroundImage = `url(${poi.icon})`;
+          iconDiv.style.backgroundSize = 'contain';
+          iconDiv.style.backgroundRepeat = 'no-repeat';
+          iconDiv.style.backgroundPosition = 'center';
+          iconDiv.style.borderRadius = '50%';
+          iconDiv.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)'; 
+
+          const timeLabel = document.createElement('div');
+          timeLabel.innerHTML = `
+            <div style="color: #544740; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 4px;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="#544740" stroke="#544740" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/>
+                <path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/>
+              </svg>
+              ${poi.walkTime}
+            </div>
+          `;
+          timeLabel.style.backgroundColor = 'rgba(255, 255, 255, 0.95)';
+          timeLabel.style.padding = '2px 8px';
+          timeLabel.style.borderRadius = '12px';
+          timeLabel.style.marginTop = '-10px'; 
+          timeLabel.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
+          timeLabel.style.border = '1px solid #e7e5e4';
+          timeLabel.style.fontFamily = '"Avenir Light", Avenir, sans-serif';
+
+          markerContainer.addEventListener('mouseenter', () => {
+            tooltip.style.opacity = '1';
+            markerContainer.style.zIndex = '30';
+          });
+          markerContainer.addEventListener('mouseleave', () => {
+            tooltip.style.opacity = '0';
+            markerContainer.style.zIndex = '10';
+          });
+
+          markerContainer.appendChild(tooltip); 
+          markerContainer.appendChild(iconDiv);
+          markerContainer.appendChild(timeLabel);
+
+          new mapboxgl.Marker({ 
+            element: markerContainer, 
+            anchor: 'bottom' 
+          })
+          .setLngLat(poi.coords as [number, number])
+          .addTo(map);
+        });
       });
     });
 
     return () => {
-      map.remove();
-      mapRef.current = null;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
-  }, []);
+  }, [isMapVisible]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -400,14 +440,6 @@ export default function Home() {
 
   const scrollToForm = () => {
     document.getElementById('kontakt')?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  const showNextImage = () => {
-    setSelectedImageIndex((prev) => prev !== null ? (prev + 1) % galleryImages.length : null);
-  };
-
-  const showPrevImage = () => {
-    setSelectedImageIndex((prev) => prev !== null ? (prev === 0 ? galleryImages.length - 1 : prev - 1) : null);
   };
 
   return (
@@ -497,7 +529,8 @@ export default function Home() {
           <button onClick={showPrevImage} className="absolute left-4 md:left-10 text-stone-400 hover:text-amber-500 transition-colors z-50 p-2">
             <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 19l-7-7 7-7"></path></svg>
           </button>
-          <img src={galleryImages[selectedImageIndex]} alt="Zväčšená vizualizácia" className="max-h-[85vh] max-w-[85vw] object-contain shadow-2xl" />
+          {/* Lazy load full size lightbox image to preserve initial speed */}
+          <img src={galleryImages[selectedImageIndex]} alt="Zväčšená vizualizácia" loading="lazy" decoding="async" className="max-h-[85vh] max-w-[85vw] object-contain shadow-2xl" />
           <button onClick={showNextImage} className="absolute right-4 md:right-10 text-stone-400 hover:text-amber-500 transition-colors z-50 p-2 rounded-md">
             <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7"></path></svg>
           </button>
@@ -510,13 +543,17 @@ export default function Home() {
       {/* 1. HERO SECTION */}
       <section id="uvod" className="relative h-screen w-full flex flex-col items-center justify-center p-6">
         <div className="absolute inset-0 z-0 overflow-hidden bg-stone-900">
+          {/* Replaced CSS backgroundImage with <img> for native browser lazy loading & optimized initial paint */}
           {galleryImages.map((img, idx) => (
-            <div
+            <img
               key={idx}
-              className={`absolute inset-0 bg-cover bg-center transition-opacity duration-[3000ms] ease-in-out ${
+              src={img}
+              alt=""
+              loading={idx === 0 ? "eager" : "lazy"}
+              decoding={idx === 0 ? "sync" : "async"}
+              className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-[3000ms] ease-in-out ${
                 idx === currentSlide ? 'opacity-100 z-10' : 'opacity-0 z-0'
               }`}
-              style={{ backgroundImage: `url('${img}')` }}
             />
           ))}
           <div className="absolute inset-0 bg-stone-900/30 z-20 pointer-events-none"></div>
@@ -554,13 +591,17 @@ export default function Home() {
                 {t.feat1P1 && <p className="text-stone-600 leading-relaxed text-lg mb-6">{t.feat1P1}</p>}
                 {t.feat1P2 && <p className="text-stone-600 leading-relaxed text-lg">{t.feat1P2}</p>}
               </div>
-              <div className="order-1 lg:order-2 h-[400px] sm:h-[600px] w-full bg-cover bg-center shadow-xl border-4 border-[#d7d9c7] rounded-sm" style={{ backgroundImage: "url('/feature-1.jpg')" }}></div>
+              <div className="order-1 lg:order-2 h-[400px] sm:h-[600px] w-full relative shadow-xl border-4 border-[#d7d9c7] rounded-sm overflow-hidden">
+                 <img src="/feature-1.jpg" alt={t.feat1T1} loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover object-center" />
+              </div>
             </div>
           </FadeInSection>
 
           <FadeInSection>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-24 items-center">
-              <div className="h-[400px] sm:h-[600px] w-full bg-cover bg-center shadow-xl border-4 border-[#d7d9c7] rounded-sm" style={{ backgroundImage: "url('/feature-2.jpg')" }}></div>
+              <div className="h-[400px] sm:h-[600px] w-full relative shadow-xl border-4 border-[#d7d9c7] rounded-sm overflow-hidden">
+                <img src="/feature-2.jpg" alt={t.feat2T1} loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-cover object-center" />
+              </div>
               <div>
                 <h2 className={`text-4xl sm:text-5xl text-stone-800 mb-6 tracking-wide uppercase ${avenirHeading}`}>
                   {t.feat2T1} 
@@ -593,7 +634,7 @@ export default function Home() {
                     <div className="absolute inset-0 bg-stone-900/0 group-hover:bg-stone-900/60 transition-all duration-300 z-10 flex items-center justify-center">
                       <svg className="w-10 h-10 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg>
                     </div>
-                    <img src={img} alt={`Galéria ${index + 1}`} className="w-full rounded h-full object-cover grayscale-[30%] group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700" />
+                    <img src={img} alt={`Galéria ${index + 1}`} loading="lazy" decoding="async" className="w-full rounded h-full object-cover grayscale-[30%] group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700" />
                   </div>
                 </FadeInSection>
               ))}
@@ -608,7 +649,7 @@ export default function Home() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 lg:gap-24 items-center">
                 
                 <div className="order-2 lg:order-1 lg:col-span-2 relative w-full bg-transparent shadow-xl  overflow-hidden rounded-lg">
-                  <img src="/history.jpg" alt="Historical photo" className="w-full h-auto block grayscale sepia-[.3]" />
+                  <img src="/history.jpg" alt="Historical photo" loading="lazy" decoding="async" className="w-full h-auto block grayscale sepia-[.3]" />
                   <div className="absolute inset-0 bg-stone-900/10 mix-blend-multiply pointer-events-none"></div>
                 </div>
                 
@@ -632,7 +673,8 @@ export default function Home() {
       <section id="lokalita" className="bg-transparent overflow-hidden">
         <FadeInSection>
           <div className="relative w-full h-[520px] lg:h-[650px] shadow-xl">
-            <div ref={mapContainerRef} className="absolute inset-0 w-full h-full" />
+            {/* The Map Container is observed to lazy load the hefty Mapbox API */}
+            <div ref={mapContainerRef} className="absolute inset-0 w-full h-full bg-[#e7e5e4]" />
           </div>
         </FadeInSection>
       </section>
