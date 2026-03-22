@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import type mapboxglType from 'mapbox-gl';
+import type { Map as MapboxMap } from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 import { translations } from './translations';
@@ -142,7 +142,7 @@ export default function Home() {
 
   // Lazy mapbox implementation hooks
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxglType.Map | null>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
   const [isMapVisible, setIsMapVisible] = useState(false);
 
   const t = translations[language] as any;
