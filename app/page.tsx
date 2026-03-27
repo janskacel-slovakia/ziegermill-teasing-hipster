@@ -96,6 +96,9 @@ export default function Home() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [gdprConsent, setGdprConsent] = useState(false);
+  // Honeypot field - hidden from real users, bots will fill it
+  const [honeypot, setHoneypot] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -133,10 +136,15 @@ export default function Home() {
     if (isRightSwipe) showPrevImage();
   };
 
-  // State for Menu Scroll Behavior - Optimized with a ref to prevent re-renders on every scroll tick
+  // State for Menu Scroll Behavior
   const [showNav, setShowNav] = useState(true);
   const scrollYRef = useRef(0);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  // Track whether user has scrolled past hero (to show sticky CTA)
+  const [pastHero, setPastHero] = useState(false);
+  // Track whether form is visible (to hide sticky CTA when form is in view)
+  const [formInView, setFormInView] = useState(false);
 
   const [language, setLanguage] = useState<'SK' | 'EN' | 'DE'>('SK'); 
 
@@ -144,6 +152,9 @@ export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [isMapVisible, setIsMapVisible] = useState(false);
+
+  const heroRef = useRef<HTMLElement>(null);
+  const formSectionRef = useRef<HTMLElement>(null);
 
   const t = translations[language] as any;
 
@@ -220,6 +231,36 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedImageIndex, showNextImage, showPrevImage]);
 
+  // Observer for hero section (sticky CTA visibility)
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setPastHero(!entries[0].isIntersecting);
+      },
+      { threshold: 0.1 }
+    );
+    
+    if (heroRef.current) {
+      observer.observe(heroRef.current);
+    }
+    return () => observer.disconnect();
+  }, []);
+
+  // Observer for form section (hide sticky CTA when form visible)
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setFormInView(entries[0].isIntersecting);
+      },
+      { threshold: 0.2 }
+    );
+    
+    if (formSectionRef.current) {
+      observer.observe(formSectionRef.current);
+    }
+    return () => observer.disconnect();
+  }, []);
+
   // Observer to lazily load Mapbox only when the user scrolls near it
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -229,7 +270,7 @@ export default function Home() {
           observer.disconnect();
         }
       },
-      { rootMargin: '400px' } // Pre-load slightly before it comes into view
+      { rootMargin: '400px' }
     );
     
     if (mapContainerRef.current) {
@@ -242,7 +283,6 @@ export default function Home() {
   useEffect(() => {
     if (!isMapVisible || !mapContainerRef.current || mapRef.current) return; 
 
-    // Dynamic import drastically reduces the initial JS bundle
     import('mapbox-gl').then((mapboxglModule) => {
       const mapboxgl = mapboxglModule.default;
       
@@ -331,11 +371,11 @@ export default function Home() {
         .addTo(map);
 
         const landmarks = [
-          { name: "Bratislavský hrad", coords: [17.1001, 48.1422], walkTime: "40 min", icon: "/icon-castle.png" },
-          { name: "Sad Janka Kráľa & Aupark", coords: [17.1085, 48.1360], walkTime: "25 min", icon: "/icon-park.png" },
-          { name: "Vienna Gate, Tesco, Lekáreň", coords: [17.0977, 48.1214], walkTime: "5 min",  icon: "/icon-shop-bus.png" },
-          { name: "ŽST Bratislava-Petržalka", coords: [17.0989, 48.1217], walkTime: "6 min",  icon: "/icon-train.png" },
-          { name: "Kúpalisko Matadorka", coords: [17.0933, 48.1228], walkTime: "4 min",  icon: "/icon-swim.png" },
+          { name: "BratislavskÃ½ hrad", coords: [17.1001, 48.1422], walkTime: "40 min", icon: "/icon-castle.png" },
+          { name: "Sad Janka KrÃ¡Ä¾a & Aupark", coords: [17.1085, 48.1360], walkTime: "25 min", icon: "/icon-park.png" },
+          { name: "Vienna Gate, Tesco, LekÃ¡reÅˆ", coords: [17.0977, 48.1214], walkTime: "5 min",  icon: "/icon-shop-bus.png" },
+          { name: "Å½ST Bratislava-PetrÅ¾alka", coords: [17.0989, 48.1217], walkTime: "6 min",  icon: "/icon-train.png" },
+          { name: "KÃºpalisko Matadorka", coords: [17.0933, 48.1228], walkTime: "4 min",  icon: "/icon-swim.png" },
         ];
 
         landmarks.forEach(poi => {
@@ -427,6 +467,18 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Honeypot check â€” if filled, silently "succeed" without inserting
+    if (honeypot) {
+      setStatus('success');
+      setName(''); setEmail(''); setPhone(''); setGdprConsent(false);
+      return;
+    }
+
+    if (!gdprConsent) {
+      return; // Should not happen due to required, but safety check
+    }
+
     setStatus('loading');
     const { error } = await supabase.from('leads').insert([{ name, email, phone }]);
     if (error) {
@@ -434,13 +486,24 @@ export default function Home() {
       setStatus('error');
     } else {
       setStatus('success');
-      setName(''); setEmail(''); setPhone('');
+      setName(''); setEmail(''); setPhone(''); setGdprConsent(false);
     }
   };
 
   const scrollToForm = () => {
     document.getElementById('kontakt')?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  const navItems = [
+    { id: 'uvod', label: t.navHome },
+    { id: 'projekt', label: t.navProject },
+    { id: 'galeria', label: t.navGallery },
+    { id: 'historia', label: t.navHistory },
+    { id: 'lokalita', label: t.navLocation },
+    { id: 'kontakt', label: t.navContact }
+  ];
+
+  const showStickyCta = pastHero && !formInView && status !== 'success';
 
   return (
     <main className={`text-stone-800 selection:bg-amber-700 selection:text-white ${avenirBody} relative`}>
@@ -467,44 +530,42 @@ export default function Home() {
         }`}
       >
         <div className="flex-1 relative">
-          {/* Hamburger Menu - Hidden on Mobile per user request */}
-          <div className="hidden md:block">
-            <button 
-              onClick={() => setIsMenuOpen(!isMenuOpen)} 
-              className="p-2 text-[#d7d9c7] hover:text-stone-700 transition-colors focus:outline-none"
-              aria-label="Menu"
-            >
+          {/* Hamburger Menu - Now visible on ALL screen sizes */}
+          <button 
+            onClick={() => setIsMenuOpen(!isMenuOpen)} 
+            className="p-2 text-[#d7d9c7] hover:text-stone-700 transition-colors focus:outline-none"
+            aria-label={isMenuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={isMenuOpen}
+          >
+            {isMenuOpen ? (
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            ) : (
               <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
               </svg>
-            </button>
-            
-            {/* Dropdown Menu */}
-            {isMenuOpen && (
-              <div className="absolute top-14 left-0 w-48 bg-[#d7d9c7]/80 backdrop-blur-sm shadow-xl border border-[#ffa62b]/30 py-2 overflow-hidden flex flex-col z-50 rounded-sm">
-                {[
-                  { id: 'uvod', label: t.navHome },
-                  { id: 'projekt', label: t.navProject },
-                  { id: 'galeria', label: t.navGallery },
-                  { id: 'historia', label: t.navHistory },
-                  { id: 'lokalita', label: t.navLocation },
-                  { id: 'kontakt', label: t.navContact }
-                ].map((item, index) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setIsMenuOpen(false);
-                      document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth' });
-                    }}
-                    style={{ animationDelay: `${index * 50}ms` }}
-                    className="animate-menu-item text-left px-6 py-3 text-stone-700 hover:bg-[#ffa62b]/50 hover:text-[#544740] transition-colors font-bold tracking-wider text-sm uppercase"
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
             )}
-          </div>
+          </button>
+          
+          {/* Dropdown Menu */}
+          {isMenuOpen && (
+            <div className="absolute top-14 left-0 w-56 bg-[#d7d9c7]/95 backdrop-blur-md shadow-xl border border-[#ffa62b]/30 py-2 overflow-hidden flex flex-col z-50 rounded-sm">
+              {navItems.map((item, index) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  style={{ animationDelay: `${index * 50}ms` }}
+                  className="animate-menu-item text-left px-6 py-3 text-stone-700 hover:bg-[#ffa62b]/50 hover:text-[#544740] transition-colors font-bold tracking-wider text-sm uppercase"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         
         <div 
@@ -519,31 +580,60 @@ export default function Home() {
         <div className="flex-1"></div>
       </nav>
 
+      {/* Close menu when clicking outside */}
+      {isMenuOpen && (
+        <div 
+          className="fixed inset-0 z-30" 
+          onClick={() => setIsMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* LIGHTBOX MODAL */}
       {selectedImageIndex !== null && (
         <div 
-          className="fixed inset-0 z-50 bg-stone-900/95 flex items-center justify-center" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
-          <button onClick={() => setSelectedImageIndex(null)} className="absolute top-8 right-8 text-stone-400 hover:text-amber-500 transition-colors z-50 p-2">
+          className="fixed inset-0 z-50 bg-stone-900/95 flex items-center justify-center" 
+          onTouchStart={onTouchStart} 
+          onTouchMove={onTouchMove} 
+          onTouchEnd={onTouchEnd}
+          role="dialog"
+          aria-label="Image lightbox"
+        >
+          <button onClick={() => setSelectedImageIndex(null)} className="absolute top-8 right-8 text-stone-400 hover:text-amber-500 transition-colors z-50 p-2" aria-label="Close lightbox">
             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
-          <button onClick={showPrevImage} className="absolute left-4 md:left-10 text-stone-400 hover:text-amber-500 transition-colors z-50 p-2">
+          <button onClick={showPrevImage} className="absolute left-4 md:left-10 text-stone-400 hover:text-amber-500 transition-colors z-50 p-2" aria-label="Previous image">
             <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M15 19l-7-7 7-7"></path></svg>
           </button>
-          {/* Lazy load full size lightbox image to preserve initial speed */}
-          <img src={galleryImages[selectedImageIndex]} alt="Zväčšená vizualizácia" loading="lazy" decoding="async" className="max-h-[85vh] max-w-[85vw] object-contain shadow-2xl" />
-          <button onClick={showNextImage} className="absolute right-4 md:right-10 text-stone-400 hover:text-amber-500 transition-colors z-50 p-2 rounded-md">
+          <img src={galleryImages[selectedImageIndex]} alt={`Gallery image ${selectedImageIndex + 1}`} loading="lazy" decoding="async" className="max-h-[85vh] max-w-[85vw] object-contain shadow-2xl" />
+          <button onClick={showNextImage} className="absolute right-4 md:right-10 text-stone-400 hover:text-amber-500 transition-colors z-50 p-2 rounded-md" aria-label="Next image">
             <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7"></path></svg>
           </button>
-          <div className="absolute bottom-8 text-stone-400 tracking-widest text-xs">
+          <div className="absolute bottom-8 text-stone-400 tracking-widest text-xs" aria-live="polite">
             {selectedImageIndex + 1} / {galleryImages.length}
           </div>
         </div>
       )}
 
+      {/* STICKY MOBILE CTA */}
+      <div 
+        className={`fixed bottom-0 left-0 right-0 z-40 md:hidden transition-transform duration-500 ease-in-out ${
+          showStickyCta ? 'translate-y-0' : 'translate-y-full'
+        }`}
+      >
+        <div className="bg-[#544740]/95 backdrop-blur-sm px-4 py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.3)]">
+          <button 
+            onClick={scrollToForm} 
+            className={`w-full bg-[#ffa62b] text-white uppercase tracking-widest text-sm py-3 rounded-sm hover:bg-amber-500 transition-colors font-bold ${avenirHeading}`}
+          >
+            {t.stickyCtaLabel}
+          </button>
+        </div>
+      </div>
+
       {/* 1. HERO SECTION */}
-      <section id="uvod" className="relative h-screen w-full flex flex-col items-center justify-center p-6">
+      <section id="uvod" ref={heroRef} className="relative h-screen w-full flex flex-col items-center justify-center p-6">
         <div className="absolute inset-0 z-0 overflow-hidden bg-stone-900">
-          {/* Replaced CSS backgroundImage with <img> for native browser lazy loading & optimized initial paint */}
           {galleryImages.map((img, idx) => (
             <img
               key={idx}
@@ -561,8 +651,6 @@ export default function Home() {
 
         <FadeInSection>
           <div className="relative z-30 text-center max-w-4xl mx-auto mt-[-5vh]">
-
-            
             <h1 className={`hidden md:block text-6xl sm:text-8xl lg:text-9xl text-white mb-6 tracking-wide uppercase drop-shadow-lg ${avenirHeading}`}>
               ZIEGERMILL
             </h1>
@@ -577,7 +665,7 @@ export default function Home() {
       </section>
 
       {/* CONTINUOUS GLASSMORPHISM WRAPPER */}
-      <div className="max-w-7xl mx-auto w-full bg-[#d7d9c7]/70 backdrop-blur-sm shadow-xl relative z-10">
+      <div className="max-w-7xl mx-auto w-full bg-[#d7d9c7]/70 backdrop-blur-lg shadow-xl relative z-10">
 
         {/* 2. VISUALIZATIONS & TEXT */}
         <section id="projekt" className="px-6 py-14 sm:py-22 overflow-hidden">
@@ -623,18 +711,24 @@ export default function Home() {
                   {t.galT1} 
                 </h2>
                 <div className="w-24 h-[1px] bg-[#3091b3] mx-auto"></div>
-
               </div>
             </FadeInSection>
             
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {galleryImages.map((img, index) => (
                 <FadeInSection key={index} delayMs={index * 100}>
-                  <div className="aspect-square overflow-hidden cursor-pointer relative group bg-stone-300 rounded-md" onClick={() => setSelectedImageIndex(index)}>
+                  <div 
+                    className="aspect-square overflow-hidden cursor-pointer relative group bg-stone-300 rounded-md" 
+                    onClick={() => setSelectedImageIndex(index)}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open gallery image ${index + 1}`}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedImageIndex(index); }}
+                  >
                     <div className="absolute inset-0 bg-stone-900/0 group-hover:bg-stone-900/60 transition-all duration-300 z-10 flex items-center justify-center">
                       <svg className="w-10 h-10 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg>
                     </div>
-                    <img src={img} alt={`Galéria ${index + 1}`} loading="lazy" decoding="async" className="w-full rounded h-full object-cover grayscale-[30%] group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700" />
+                    <img src={img} alt={`Gallery ${index + 1}`} loading="lazy" decoding="async" className="w-full rounded h-full object-cover grayscale-[30%] group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700" />
                   </div>
                 </FadeInSection>
               ))}
@@ -648,7 +742,7 @@ export default function Home() {
             <FadeInSection>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 lg:gap-24 items-center">
                 
-                <div className="order-2 lg:order-1 lg:col-span-2 relative w-full bg-transparent shadow-xl  overflow-hidden rounded-lg">
+                <div className="order-2 lg:order-1 lg:col-span-2 relative w-full bg-transparent shadow-xl overflow-hidden rounded-lg">
                   <img src="/history.jpg" alt="Historical photo" loading="lazy" decoding="async" className="w-full h-auto block grayscale sepia-[.3]" />
                   <div className="absolute inset-0 bg-stone-900/10 mix-blend-multiply pointer-events-none"></div>
                 </div>
@@ -673,19 +767,18 @@ export default function Home() {
       <section id="lokalita" className="bg-transparent overflow-hidden">
         <FadeInSection>
           <div className="relative w-full h-[520px] lg:h-[650px] shadow-xl">
-            {/* The Map Container is observed to lazy load the hefty Mapbox API */}
             <div ref={mapContainerRef} className="absolute inset-0 w-full h-full bg-[#e7e5e4]" />
           </div>
         </FadeInSection>
       </section>
 
       {/* 5. LEAD CAPTURE FORM SECTION */}
-      <section id="kontakt" className="py-10 px-6 overflow-hidden max-w-7xl mx-auto w-full bg-[#d7d9c7]/70 backdrop-blur-sm shadow-xl relative z-10 ">
+      <section id="kontakt" ref={formSectionRef} className="py-10 px-6 overflow-hidden max-w-7xl mx-auto w-full bg-[#d7d9c7]/70 backdrop-blur-lg shadow-xl relative z-10">
         <FadeInSection>
           <div className="max-w-2xl mx-auto">
             
-            <div className="p-4 sm:p-14 shadow-2xl relative overflow-hidden ">
-              <div className="absolute inset-2 pointer-events-none "></div>
+            <div className="p-4 sm:p-14 shadow-2xl relative overflow-hidden">
+              <div className="absolute inset-2 pointer-events-none"></div>
 
               <div className="text-center mb-10 relative z-10">
                 <h2 className={`text-3xl text-stone-700 mb-4 tracking-wide uppercase ${avenirHeading}`}>{t.formTitle}</h2>
@@ -700,21 +793,105 @@ export default function Home() {
                   </div>
                   <h3 className={`text-2xl text-amber-700 mb-3 uppercase tracking-wide ${avenirHeading}`}>{t.formThanks}</h3>
                   <p className="text-stone-700">{t.formThanksDesc}</p>
-                  <button onClick={() => setStatus('idle')} className="mt-8 rounded-sm text-sm text-amber-600 uppercase tracking-widest hover:text-amber-500 transition-colors border-b border-amber-600/30 pb-1">{t.formNew}</button>
+                  <button onClick={() => setStatus('idle')} className="mt-8 rounded-sm text-sm text-amber-600 uppercase tracking-widest hover:text-amber-500 transition-colors border-b border-amber-600/30 pb-1">{t.formNew || 'Submit again'}</button>
                 </div>
               ) : (
-                <form onSubmit={handleSubmit} className="space-y-6 relative z-10">
-                  <div>
-                    <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 outline-none text-white transition-all placeholder-stone-300" placeholder={t.formName} />
+                <form onSubmit={handleSubmit} className="space-y-5 relative z-10" noValidate>
+                  {/* Honeypot field â€” invisible to humans, bots will fill it */}
+                  <div className="absolute -left-[9999px]" aria-hidden="true">
+                    <label htmlFor="website">Website</label>
+                    <input 
+                      type="text" 
+                      id="website" 
+                      name="website" 
+                      tabIndex={-1} 
+                      autoComplete="off" 
+                      value={honeypot} 
+                      onChange={(e) => setHoneypot(e.target.value)} 
+                    />
                   </div>
+
+                  {/* Name field */}
                   <div>
-                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 outline-none text-white transition-all placeholder-stone-300" placeholder={t.formEmail} />
+                    <label htmlFor="form-name" className="block text-stone-600 text-sm font-bold uppercase tracking-wider mb-2">
+                      {t.formName} <span className="text-amber-600">*</span>
+                    </label>
+                    <input 
+                      id="form-name"
+                      type="text" 
+                      required 
+                      value={name} 
+                      onChange={(e) => setName(e.target.value)} 
+                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-300" 
+                      placeholder={t.formName}
+                      autoComplete="name"
+                    />
                   </div>
+
+                  {/* Email field */}
                   <div>
-                    <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 outline-none text-white transition-all placeholder-stone-300" placeholder={t.formPhone} />
+                    <label htmlFor="form-email" className="block text-stone-600 text-sm font-bold uppercase tracking-wider mb-2">
+                      {t.formEmail} <span className="text-amber-600">*</span>
+                    </label>
+                    <input 
+                      id="form-email"
+                      type="email" 
+                      required 
+                      value={email} 
+                      onChange={(e) => setEmail(e.target.value)} 
+                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-300" 
+                      placeholder={t.formEmail}
+                      autoComplete="email"
+                    />
                   </div>
+
+                  {/* Phone field */}
+                  <div>
+                    <label htmlFor="form-phone" className="block text-stone-600 text-sm font-bold uppercase tracking-wider mb-2">
+                      {t.formPhone}
+                    </label>
+                    <input 
+                      id="form-phone"
+                      type="tel" 
+                      value={phone} 
+                      onChange={(e) => setPhone(e.target.value)} 
+                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-300" 
+                      placeholder={t.formPhone}
+                      autoComplete="tel"
+                    />
+                  </div>
+
+                  {/* GDPR Consent Checkbox */}
+                  <div className="flex items-start gap-3 pt-2">
+                    <input 
+                      id="form-gdpr"
+                      type="checkbox" 
+                      required
+                      checked={gdprConsent} 
+                      onChange={(e) => setGdprConsent(e.target.checked)} 
+                      className="mt-1 h-5 w-5 rounded border-stone-500 bg-[#3091b3]/30 text-amber-600 focus:ring-[#ffa62b]/50 cursor-pointer shrink-0"
+                    />
+                    <label htmlFor="form-gdpr" className="text-stone-600 text-sm leading-relaxed cursor-pointer">
+                      {t.formGdpr}{' '}
+                      <a 
+                        href="/ochrana-osobnych-udajov" 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="underline underline-offset-2 text-[#3091b3] hover:text-amber-600 transition-colors"
+                      >
+                        {t.formGdprLink}
+                      </a>
+                      {' '}<span className="text-amber-600">*</span>
+                    </label>
+                  </div>
+
                   {status === 'error' && <p className="text-amber-700 text-sm text-center mt-2 bg-amber-900/20 py-3 border border-amber-900/50">{t.formError}</p>}
-                  <button type="submit" disabled={status === 'loading'} className="w-full rounded-sm mt-6 bg-stone-500/70 text-stone-300 uppercase tracking-widest text-sm py-5 hover:bg-white hover:text-stone-600 transition-colors duration-300 disabled:opacity-50 font-bold">
+                  
+                  <button 
+                    type="submit" 
+                    disabled={status === 'loading' || !gdprConsent} 
+                    className="w-full rounded-sm mt-6 bg-stone-500/70 text-stone-300 uppercase tracking-widest text-sm py-5 hover:bg-white hover:text-stone-600 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-bold"
+                  >
                     {status === 'loading' ? t.formSending : t.formSubmit}
                   </button>
                 </form>
@@ -737,6 +914,7 @@ export default function Home() {
                   ? 'text-amber-500 border-b-2 border-amber-500' 
                   : 'text-stone-400 hover:text-stone-200'
               }`}
+              aria-current={language === lang ? 'true' : undefined}
             >
               {lang}
             </button>
@@ -757,6 +935,9 @@ export default function Home() {
           </a>
         </div>
       </footer>
+
+      {/* Bottom padding on mobile to account for sticky CTA */}
+      <div className="h-16 md:hidden" aria-hidden="true"></div>
     </main>
   );
 }
