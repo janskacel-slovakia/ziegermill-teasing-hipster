@@ -371,11 +371,11 @@ export default function Home() {
         .addTo(map);
 
         const landmarks = [
-          { name: "BratislavskÃ½ hrad", coords: [17.1001, 48.1422], walkTime: "40 min", icon: "/icon-castle.png" },
-          { name: "Sad Janka KrÃ¡Ä¾a & Aupark", coords: [17.1085, 48.1360], walkTime: "25 min", icon: "/icon-park.png" },
-          { name: "Vienna Gate, Tesco, LekÃ¡reÅˆ", coords: [17.0977, 48.1214], walkTime: "5 min",  icon: "/icon-shop-bus.png" },
-          { name: "Å½ST Bratislava-PetrÅ¾alka", coords: [17.0989, 48.1217], walkTime: "6 min",  icon: "/icon-train.png" },
-          { name: "KÃºpalisko Matadorka", coords: [17.0933, 48.1228], walkTime: "4 min",  icon: "/icon-swim.png" },
+          { name: "Bratislavský hrad", coords: [17.1001, 48.1422], walkTime: "40 min", icon: "/icon-castle.png" },
+          { name: "Sad Janka Kráľa & Aupark", coords: [17.1085, 48.1360], walkTime: "25 min", icon: "/icon-park.png" },
+          { name: "Vienna Gate, Tesco, Lekáreň", coords: [17.0977, 48.1214], walkTime: "5 min",  icon: "/icon-shop-bus.png" },
+          { name: "ŽST Bratislava-Petržalka", coords: [17.0989, 48.1217], walkTime: "6 min",  icon: "/icon-train.png" },
+          { name: "Kúpalisko Matadorka", coords: [17.0933, 48.1228], walkTime: "4 min",  icon: "/icon-swim.png" },
         ];
 
         landmarks.forEach(poi => {
@@ -468,7 +468,7 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Honeypot check â€” if filled, silently "succeed" without inserting
+    // Honeypot check — if filled, silently "succeed" without inserting
     if (honeypot) {
       setStatus('success');
       setName(''); setEmail(''); setPhone(''); setGdprConsent(false);
@@ -525,12 +525,12 @@ export default function Home() {
 
       {/* STICKY TOP MENU BAR */}
       <nav
-        className={`fixed top-1 left-0 w-full h-40 z-40 bg-[#3091b3]/40 backdrop-blur-sm shadow-md transition-transform duration-500 ease-in-out flex items-center px-6 md:px-12 ${
+        className={`fixed top-1 left-0 w-full h-40 z-40 bg-[#3091b3]/40 backdrop-blur-sm shadow-md transition-transform duration-500 ease-in-out flex items-center justify-center px-6 md:px-12 ${
           showNav ? 'translate-y-0' : '-translate-y-[110%]'
         }`}
       >
-        <div className="flex-1 relative">
-          {/* Hamburger Menu - Now visible on ALL screen sizes */}
+        {/* Hamburger — absolutely positioned so it never shifts the centered logo */}
+        <div className="absolute left-4 md:left-10 top-1/2 -translate-y-1/2 z-50">
           <button 
             onClick={() => setIsMenuOpen(!isMenuOpen)} 
             className="p-2 text-[#d7d9c7] hover:text-stone-700 transition-colors focus:outline-none"
@@ -550,7 +550,7 @@ export default function Home() {
           
           {/* Dropdown Menu */}
           {isMenuOpen && (
-            <div className="absolute top-14 left-0 w-56 bg-[#d7d9c7]/95 backdrop-blur-md shadow-xl border border-[#ffa62b]/30 py-2 overflow-hidden flex flex-col z-50 rounded-sm">
+            <div className="absolute top-full left-0 mt-2 w-56 bg-[#d7d9c7]/95 backdrop-blur-md shadow-xl border border-[#ffa62b]/30 py-2 overflow-hidden flex flex-col z-50 rounded-sm">
               {navItems.map((item, index) => (
                 <button
                   key={item.id}
@@ -567,17 +567,17 @@ export default function Home() {
             </div>
           )}
         </div>
-        
+
+        {/* Logo — centered via justify-center on the parent flex container */}
         <div 
-          className="flex-shrink-0 cursor-pointer max-w-full overflow-hidden"
+          className="cursor-pointer"
           onClick={() => {
             setIsMenuOpen(false);
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
         >
-          <img src="/logo.png" alt="Zieger Mill Logo" className="h-auto max-h-[100px] sm:max-h-none sm:h-35 w-auto max-w-full sm:max-w-none object-contain" />
+          <img src="/logo.png" alt="Zieger Mill Logo" className="h-auto max-h-[80px] sm:max-h-none sm:h-35 w-auto object-contain" />
         </div>
-        <div className="flex-1"></div>
       </nav>
 
       {/* Close menu when clicking outside */}
@@ -624,7 +624,7 @@ export default function Home() {
         <div className="bg-[#544740]/95 backdrop-blur-sm px-4 py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.3)]">
           <button 
             onClick={scrollToForm} 
-            className={`w-full bg-[#ffa62b] text-white uppercase tracking-widest text-sm py-3 rounded-sm hover:bg-amber-500 transition-colors font-bold ${avenirHeading}`}
+            className={`w-full bg-white/20 text-white uppercase tracking-widest text-sm py-3 rounded-sm hover:bg-amber-500 transition-colors font-bold ${avenirHeading}`}
           >
             {t.stickyCtaLabel}
           </button>
@@ -665,7 +665,7 @@ export default function Home() {
       </section>
 
       {/* CONTINUOUS GLASSMORPHISM WRAPPER */}
-      <div className="max-w-7xl mx-auto w-full bg-[#d7d9c7]/70 backdrop-blur-lg shadow-xl relative z-10">
+      <div className="max-w-7xl mx-auto w-full bg-[#d7d9c7]/70 backdrop-blur-sm shadow-xl relative z-10">
 
         {/* 2. VISUALIZATIONS & TEXT */}
         <section id="projekt" className="px-6 py-14 sm:py-22 overflow-hidden">
@@ -773,7 +773,7 @@ export default function Home() {
       </section>
 
       {/* 5. LEAD CAPTURE FORM SECTION */}
-      <section id="kontakt" ref={formSectionRef} className="py-10 px-6 overflow-hidden max-w-7xl mx-auto w-full bg-[#d7d9c7]/70 backdrop-blur-lg shadow-xl relative z-10">
+      <section id="kontakt" ref={formSectionRef} className="py-10 px-6 overflow-hidden max-w-7xl mx-auto w-full bg-[#d7d9c7]/70 backdrop-blur-sm shadow-xl relative z-10">
         <FadeInSection>
           <div className="max-w-2xl mx-auto">
             
@@ -797,7 +797,7 @@ export default function Home() {
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-5 relative z-10" noValidate>
-                  {/* Honeypot field â€” invisible to humans, bots will fill it */}
+                  {/* Honeypot field — invisible to humans, bots will fill it */}
                   <div className="absolute -left-[9999px]" aria-hidden="true">
                     <label htmlFor="website">Website</label>
                     <input 
@@ -822,7 +822,7 @@ export default function Home() {
                       required 
                       value={name} 
                       onChange={(e) => setName(e.target.value)} 
-                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-300" 
+                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-400" 
                       placeholder={t.formName}
                       autoComplete="name"
                     />
@@ -839,7 +839,7 @@ export default function Home() {
                       required 
                       value={email} 
                       onChange={(e) => setEmail(e.target.value)} 
-                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-300" 
+                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-400" 
                       placeholder={t.formEmail}
                       autoComplete="email"
                     />
@@ -855,7 +855,7 @@ export default function Home() {
                       type="tel" 
                       value={phone} 
                       onChange={(e) => setPhone(e.target.value)} 
-                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-300" 
+                      className="w-full rounded-sm px-5 py-4 bg-[#3091b3]/50 border border-stone-700 focus:border-stone-300 focus:ring-2 focus:ring-[#ffa62b]/30 outline-none text-white transition-all placeholder-stone-400" 
                       placeholder={t.formPhone}
                       autoComplete="tel"
                     />
